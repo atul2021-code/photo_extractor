@@ -1,0 +1,555 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Passport Photo Extractor</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+<style>
+  :root {
+    --bg: #f7f7f8;
+    --card-bg: #ffffff;
+    --text: #1a1a1a;
+    --text-muted: #6b6b6b;
+    --border: #e2e2e5;
+    --accent: #2f6fed;
+    --accent-hover: #2558c4;
+    --accent-text: #ffffff;
+    --danger: #d64545;
+    --track-bg: #eceef1;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #16171a;
+      --card-bg: #1f2023;
+      --text: #ececec;
+      --text-muted: #9a9a9f;
+      --border: #313236;
+      --accent: #5b8dfb;
+      --accent-hover: #7ba1ff;
+      --accent-text: #101114;
+      --danger: #ff6b6b;
+      --track-bg: #2a2b2f;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #16171a;
+    --card-bg: #1f2023;
+    --text: #ececec;
+    --text-muted: #9a9a9f;
+    --border: #313236;
+    --accent: #5b8dfb;
+    --accent-hover: #7ba1ff;
+    --accent-text: #101114;
+    --danger: #ff6b6b;
+    --track-bg: #2a2b2f;
+  }
+
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    padding: 24px 16px 60px;
+  }
+  .wrap { max-width: 880px; margin: 0 auto; }
+  h1 { font-size: 1.5rem; margin: 0 0 4px; }
+  .sub { color: var(--text-muted); margin: 0 0 24px; font-size: 0.95rem; }
+
+  .card {
+    background: var(--card-bg);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 20px;
+    margin-bottom: 20px;
+  }
+
+  .dropzone {
+    border: 2px dashed var(--border);
+    border-radius: 10px;
+    padding: 32px 16px;
+    text-align: center;
+    cursor: pointer;
+    transition: border-color 0.15s, background 0.15s;
+  }
+  .dropzone:hover, .dropzone.drag {
+    border-color: var(--accent);
+    background: color-mix(in srgb, var(--accent) 6%, transparent);
+  }
+  .dropzone input { display: none; }
+  .dz-title { font-weight: 600; margin-bottom: 4px; }
+  .dz-sub { color: var(--text-muted); font-size: 0.85rem; }
+
+  .file-info { margin-top: 14px; font-size: 0.9rem; color: var(--text-muted); display: none; }
+  .file-info.show { display: block; }
+
+  button.primary {
+    background: var(--accent);
+    color: var(--accent-text);
+    border: none;
+    border-radius: 8px;
+    padding: 10px 18px;
+    font-size: 0.95rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: background 0.15s;
+  }
+  button.primary:hover:not(:disabled) { background: var(--accent-hover); }
+  button.primary:disabled { opacity: 0.5; cursor: not-allowed; }
+
+  button.secondary {
+    background: transparent;
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 9px 16px;
+    font-size: 0.9rem;
+    cursor: pointer;
+  }
+  button.secondary:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); }
+  button.secondary:disabled { opacity: 0.5; cursor: not-allowed; }
+
+  .actions { display: flex; gap: 10px; margin-top: 16px; flex-wrap: wrap; align-items: center; }
+
+  .progress-track {
+    width: 100%; height: 8px; border-radius: 4px;
+    background: var(--track-bg); overflow: hidden; margin-top: 16px; display: none;
+  }
+  .progress-track.show { display: block; }
+  .progress-fill {
+    height: 100%; width: 0%; background: var(--accent); transition: width 0.2s;
+  }
+  .status { font-size: 0.85rem; color: var(--text-muted); margin-top: 8px; min-height: 1.2em; }
+
+  .results-header {
+    display: flex; justify-content: space-between; align-items: center;
+    margin-bottom: 14px; flex-wrap: wrap; gap: 10px;
+  }
+  .grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(110px, 1fr));
+    gap: 12px;
+  }
+  .thumb {
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    overflow: hidden;
+    background: var(--track-bg);
+  }
+  .thumb img { width: 100%; display: block; aspect-ratio: 3/4; object-fit: cover; }
+  .thumb .label {
+    font-size: 0.72rem; text-align: center; padding: 4px 2px; color: var(--text-muted);
+  }
+  .thumb a.dl {
+    display: block; text-align: center; font-size: 0.72rem; padding: 4px;
+    color: var(--accent); text-decoration: none; border-top: 1px solid var(--border);
+  }
+  .thumb a.dl:hover { background: color-mix(in srgb, var(--accent) 8%, transparent); }
+
+  .empty-hint { color: var(--text-muted); font-size: 0.9rem; }
+  .error-box {
+    background: color-mix(in srgb, var(--danger) 12%, var(--card-bg));
+    border: 1px solid var(--danger);
+    color: var(--text);
+    border-radius: 8px;
+    padding: 12px 14px;
+    font-size: 0.85rem;
+    margin-top: 14px;
+    display: none;
+    white-space: pre-wrap;
+  }
+  .error-box.show { display: block; }
+
+  footer { text-align: center; color: var(--text-muted); font-size: 0.78rem; margin-top: 30px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>📷 Passport Photo Extractor</h1>
+  <p class="sub">Select a scanned PDF sheet of passport-size photos. Everything runs locally in your browser — nothing is uploaded anywhere.</p>
+
+  <div class="card">
+    <label class="dropzone" id="dropzone">
+      <input type="file" id="fileInput" accept="application/pdf">
+      <div class="dz-title">Click to choose a PDF, or drag one here</div>
+      <div class="dz-sub">Works best with a scanned page of photos in a grid layout</div>
+    </label>
+    <div class="file-info" id="fileInfo"></div>
+
+    <div class="actions">
+      <button class="primary" id="extractBtn" disabled>Extract Photos</button>
+      <button class="secondary" id="clearBtn" style="display:none;">Clear</button>
+    </div>
+
+    <div class="progress-track" id="progressTrack"><div class="progress-fill" id="progressFill"></div></div>
+    <div class="status" id="status"></div>
+    <div class="error-box" id="errorBox"></div>
+  </div>
+
+  <div class="card" id="resultsCard" style="display:none;">
+    <div class="results-header">
+      <strong id="resultsCount"></strong>
+      <button class="secondary" id="downloadAllBtn">Download All (.zip)</button>
+    </div>
+    <div class="grid" id="resultsGrid"></div>
+  </div>
+
+  <footer>Processing happens entirely on your device. Nothing is sent to any server.</footer>
+</div>
+
+<script>
+pdfjsLib.GlobalWorkerOptions.workerSrc = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
+
+const fileInput = document.getElementById('fileInput');
+const dropzone = document.getElementById('dropzone');
+const fileInfo = document.getElementById('fileInfo');
+const extractBtn = document.getElementById('extractBtn');
+const clearBtn = document.getElementById('clearBtn');
+const progressTrack = document.getElementById('progressTrack');
+const progressFill = document.getElementById('progressFill');
+const statusEl = document.getElementById('status');
+const errorBox = document.getElementById('errorBox');
+const resultsCard = document.getElementById('resultsCard');
+const resultsCount = document.getElementById('resultsCount');
+const resultsGrid = document.getElementById('resultsGrid');
+const downloadAllBtn = document.getElementById('downloadAllBtn');
+
+let selectedFile = null;
+let extractedPhotos = []; // {blob, url, name}
+
+function setStatus(msg) { statusEl.textContent = msg; }
+function showError(msg) {
+  errorBox.textContent = msg;
+  errorBox.classList.add('show');
+}
+function clearError() {
+  errorBox.classList.remove('show');
+  errorBox.textContent = '';
+}
+
+function handleFile(file) {
+  if (!file || file.type !== 'application/pdf') {
+    showError('Please select a PDF file.');
+    return;
+  }
+  selectedFile = file;
+  clearError();
+  fileInfo.textContent = `Selected: ${file.name} (${(file.size / 1024 / 1024).toFixed(2)} MB)`;
+  fileInfo.classList.add('show');
+  extractBtn.disabled = false;
+  clearBtn.style.display = 'inline-block';
+  resultsCard.style.display = 'none';
+}
+
+fileInput.addEventListener('change', (e) => handleFile(e.target.files[0]));
+
+dropzone.addEventListener('dragover', (e) => { e.preventDefault(); dropzone.classList.add('drag'); });
+dropzone.addEventListener('dragleave', () => dropzone.classList.remove('drag'));
+dropzone.addEventListener('drop', (e) => {
+  e.preventDefault();
+  dropzone.classList.remove('drag');
+  if (e.dataTransfer.files.length) handleFile(e.dataTransfer.files[0]);
+});
+
+clearBtn.addEventListener('click', () => {
+  selectedFile = null;
+  fileInput.value = '';
+  fileInfo.classList.remove('show');
+  extractBtn.disabled = true;
+  clearBtn.style.display = 'none';
+  resultsCard.style.display = 'none';
+  clearError();
+  setStatus('');
+});
+
+// ---------- Image processing helpers ----------
+
+function dilateMask(mask, width, height, radius) {
+  const temp = new Uint8Array(width * height);
+  for (let y = 0; y < height; y++) {
+    let runEnd = -1;
+    for (let x = 0; x < width; x++) {
+      if (x > runEnd) {
+        let found = false;
+        for (let dx = 0; dx <= radius; dx++) {
+          const xx = x + dx;
+          if (xx < width && mask[y * width + xx]) { found = true; runEnd = xx + radius; break; }
+        }
+        temp[y * width + x] = found ? 1 : 0;
+      } else {
+        temp[y * width + x] = 1;
+      }
+    }
+  }
+  const out = new Uint8Array(width * height);
+  for (let x = 0; x < width; x++) {
+    let runEnd = -1;
+    for (let y = 0; y < height; y++) {
+      if (y > runEnd) {
+        let found = false;
+        for (let dy = 0; dy <= radius; dy++) {
+          const yy = y + dy;
+          if (yy < height && temp[yy * width + x]) { found = true; runEnd = yy + radius; break; }
+        }
+        out[y * width + x] = found ? 1 : 0;
+      } else {
+        out[y * width + x] = 1;
+      }
+    }
+  }
+  return out;
+}
+
+function findComponents(mask, width, height) {
+  const visited = new Uint8Array(width * height);
+  const boxes = [];
+  const stackX = new Int32Array(width * height);
+  const stackY = new Int32Array(width * height);
+
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) {
+      const idx = y * width + x;
+      if (mask[idx] && !visited[idx]) {
+        let sp = 0;
+        stackX[sp] = x; stackY[sp] = y; sp++;
+        visited[idx] = 1;
+        let minX = x, maxX = x, minY = y, maxY = y, count = 0;
+        while (sp > 0) {
+          sp--;
+          const cx = stackX[sp], cy = stackY[sp];
+          count++;
+          if (cx < minX) minX = cx;
+          if (cx > maxX) maxX = cx;
+          if (cy < minY) minY = cy;
+          if (cy > maxY) maxY = cy;
+          const nIdxs = [
+            [cx - 1, cy], [cx + 1, cy], [cx, cy - 1], [cx, cy + 1]
+          ];
+          for (const [nx, ny] of nIdxs) {
+            if (nx >= 0 && nx < width && ny >= 0 && ny < height) {
+              const nidx = ny * width + nx;
+              if (mask[nidx] && !visited[nidx]) {
+                visited[nidx] = 1;
+                stackX[sp] = nx; stackY[sp] = ny; sp++;
+              }
+            }
+          }
+        }
+        boxes.push({ minX, maxX, minY, maxY, count });
+      }
+    }
+  }
+  return boxes;
+}
+
+async function detectPhotoBoxesOnPage(page) {
+  // Render at a modest "detection" resolution for fast analysis
+  const baseViewport = page.getViewport({ scale: 1 });
+  const detectScale = Math.min(2.0, 1400 / Math.max(baseViewport.width, baseViewport.height));
+  const detectViewport = page.getViewport({ scale: Math.max(detectScale, 0.3) });
+
+  const detectCanvas = document.createElement('canvas');
+  detectCanvas.width = Math.round(detectViewport.width);
+  detectCanvas.height = Math.round(detectViewport.height);
+  const detectCtx = detectCanvas.getContext('2d');
+  await page.render({ canvasContext: detectCtx, viewport: detectViewport }).promise;
+
+  const { width, height } = detectCanvas;
+  const imgData = detectCtx.getImageData(0, 0, width, height).data;
+
+  const mask = new Uint8Array(width * height);
+  for (let i = 0, p = 0; i < imgData.length; i += 4, p++) {
+    const r = imgData[i], g = imgData[i + 1], b = imgData[i + 2];
+    const gray = 0.299 * r + 0.587 * g + 0.114 * b;
+    mask[p] = gray < 245 ? 1 : 0;
+  }
+
+  const dilated = dilateMask(mask, width, height, 6);
+  const components = findComponents(dilated, width, height);
+
+  const pageArea = width * height;
+  let boxes = components
+    .map(c => ({
+      x: c.minX, y: c.minY,
+      w: c.maxX - c.minX + 1, h: c.maxY - c.minY + 1,
+      area: c.count
+    }))
+    .filter(b => {
+      const boxArea = b.w * b.h;
+      return boxArea > pageArea * 0.004 && boxArea < pageArea * 0.55;
+    });
+
+  boxes.sort((a, b) => {
+    const rowA = Math.round(a.y / (height * 0.04));
+    const rowB = Math.round(b.y / (height * 0.04));
+    if (rowA !== rowB) return rowA - rowB;
+    return a.x - b.x;
+  });
+
+  return { boxes, detectWidth: width, detectHeight: height };
+}
+
+async function renderFullResPage(page) {
+  const baseViewport = page.getViewport({ scale: 1 });
+  const targetDpi = 300;
+  let scale = targetDpi / 72;
+  const maxDim = 3600;
+  if (Math.max(baseViewport.width, baseViewport.height) * scale > maxDim) {
+    scale = maxDim / Math.max(baseViewport.width, baseViewport.height);
+  }
+  const viewport = page.getViewport({ scale });
+  const canvas = document.createElement('canvas');
+  canvas.width = Math.round(viewport.width);
+  canvas.height = Math.round(viewport.height);
+  const ctx = canvas.getContext('2d');
+  await page.render({ canvasContext: ctx, viewport }).promise;
+  return canvas;
+}
+
+function cropCanvas(sourceCanvas, sx, sy, sw, sh) {
+  const out = document.createElement('canvas');
+  out.width = Math.max(1, Math.round(sw));
+  out.height = Math.max(1, Math.round(sh));
+  const ctx = out.getContext('2d');
+  ctx.drawImage(sourceCanvas, sx, sy, sw, sh, 0, 0, out.width, out.height);
+  return out;
+}
+
+function canvasToBlob(canvas, quality = 0.95) {
+  return new Promise((resolve) => canvas.toBlob(resolve, 'image/jpeg', quality));
+}
+
+// ---------- Main extraction flow ----------
+
+extractBtn.addEventListener('click', async () => {
+  if (!selectedFile) return;
+  clearError();
+  extractedPhotos.forEach(p => URL.revokeObjectURL(p.url));
+  extractedPhotos = [];
+  resultsGrid.innerHTML = '';
+  resultsCard.style.display = 'none';
+
+  extractBtn.disabled = true;
+  clearBtn.disabled = true;
+  progressTrack.classList.add('show');
+  progressFill.style.width = '0%';
+
+  try {
+    const arrayBuffer = await selectedFile.arrayBuffer();
+    setStatus('Loading PDF...');
+    const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+
+    let photoCount = 0;
+    const numPages = pdf.numPages;
+
+    for (let pageNum = 1; pageNum <= numPages; pageNum++) {
+      setStatus(`Analyzing page ${pageNum} of ${numPages}...`);
+      progressFill.style.width = `${Math.round(((pageNum - 1) / numPages) * 40)}%`;
+
+      const page = await pdf.getPage(pageNum);
+      const { boxes, detectWidth, detectHeight } = await detectPhotoBoxesOnPage(page);
+
+      if (boxes.length === 0) continue;
+
+      setStatus(`Rendering page ${pageNum} at high resolution...`);
+      progressFill.style.width = `${Math.round(((pageNum - 1) / numPages) * 40 + 15)}%`;
+      const fullCanvas = await renderFullResPage(page);
+
+      const scaleX = fullCanvas.width / detectWidth;
+      const scaleY = fullCanvas.height / detectHeight;
+
+      for (let i = 0; i < boxes.length; i++) {
+        const b = boxes[i];
+        const pad = 3;
+        const sx = Math.max(0, (b.x + pad) * scaleX);
+        const sy = Math.max(0, (b.y + pad) * scaleY);
+        const sw = Math.max(1, (b.w - pad * 2) * scaleX);
+        const sh = Math.max(1, (b.h - pad * 2) * scaleY);
+
+        const cropped = cropCanvas(fullCanvas, sx, sy, sw, sh);
+        const blob = await canvasToBlob(cropped, 0.95);
+        photoCount++;
+        const name = `photo_${photoCount}.jpg`;
+        const url = URL.createObjectURL(blob);
+        extractedPhotos.push({ blob, url, name });
+
+        setStatus(`Extracted ${photoCount} photo(s)...`);
+        progressFill.style.width = `${Math.round(((pageNum - 1) / numPages) * 40 + 15 + ((i + 1) / boxes.length) * (40 / numPages))}%`;
+      }
+    }
+
+    progressFill.style.width = '100%';
+
+    if (extractedPhotos.length === 0) {
+      setStatus('');
+      showError('No photos were detected in this PDF. The layout may not match a standard grid of photos on a white background.');
+    } else {
+      setStatus(`Done — ${extractedPhotos.length} photo(s) extracted.`);
+      renderResults();
+    }
+  } catch (err) {
+    console.error(err);
+    setStatus('');
+    showError('Something went wrong while processing this PDF: ' + (err && err.message ? err.message : String(err)));
+  } finally {
+    extractBtn.disabled = false;
+    clearBtn.disabled = false;
+    setTimeout(() => progressTrack.classList.remove('show'), 600);
+  }
+});
+
+function renderResults() {
+  resultsGrid.innerHTML = '';
+  resultsCount.textContent = `${extractedPhotos.length} photo${extractedPhotos.length === 1 ? '' : 's'} extracted`;
+  extractedPhotos.forEach((p) => {
+    const div = document.createElement('div');
+    div.className = 'thumb';
+    const img = document.createElement('img');
+    img.src = p.url;
+    img.alt = p.name;
+    const label = document.createElement('div');
+    label.className = 'label';
+    label.textContent = p.name;
+    const link = document.createElement('a');
+    link.className = 'dl';
+    link.href = p.url;
+    link.download = p.name;
+    link.textContent = 'Download';
+    div.appendChild(img);
+    div.appendChild(label);
+    div.appendChild(link);
+    resultsGrid.appendChild(div);
+  });
+  resultsCard.style.display = 'block';
+}
+
+downloadAllBtn.addEventListener('click', async () => {
+  if (extractedPhotos.length === 0) return;
+  downloadAllBtn.disabled = true;
+  downloadAllBtn.textContent = 'Zipping...';
+  try {
+    const zip = new JSZip();
+    for (const p of extractedPhotos) {
+      zip.file(p.name, p.blob);
+    }
+    const content = await zip.generateAsync({ type: 'blob' });
+    const url = URL.createObjectURL(content);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'extracted_photos.zip';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    setTimeout(() => URL.revokeObjectURL(url), 5000);
+  } catch (err) {
+    showError('Could not create the zip file: ' + (err && err.message ? err.message : String(err)));
+  } finally {
+    downloadAllBtn.disabled = false;
+    downloadAllBtn.textContent = 'Download All (.zip)';
+  }
+});
+</script>
+</body>
+</html>
